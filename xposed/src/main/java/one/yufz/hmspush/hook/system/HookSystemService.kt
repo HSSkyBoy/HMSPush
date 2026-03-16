@@ -12,7 +12,6 @@ import one.yufz.hmspush.hook.XLog
 import one.yufz.xposed.callMethod
 import one.yufz.xposed.deoptimizeMethod
 import one.yufz.xposed.get
-import one.yufz.xposed.hook
 import one.yufz.xposed.hookMethod
 
 class HookSystemService {
@@ -20,13 +19,12 @@ class HookSystemService {
         private const val TAG = "HookSystemService"
 
         val isSystemHookReady: Boolean by lazy {
-            try {
+            runCatching {
                 val nm = AndroidAppHelper.currentApplication().getSystemService(NotificationManager::class.java)
                 nm.callMethod("isSystemConditionProviderEnabled", IS_SYSTEM_HOOK_READY) as Boolean
-            } catch (t: Throwable) {
-                XLog.e(TAG, "isSystemHookReady error", t)
-                false
-            }
+            }.onFailure { 
+                XLog.e(TAG, "isSystemHookReady error", it) 
+            }.getOrDefault(false)
         }
 
     }
@@ -59,21 +57,17 @@ class HookSystemService {
             XposedHelpers.findMethodExact(classNotificationManagerService, "resolveNotificationUid", String::class.java, String::class.java, Int::class.java, Int::class.java)
                 .deoptimizeMethod()
 
-            //https://cs.android.com/android/platform/superproject/+/android-cts-10.0_r1:frameworks/base/services/core/java/com/android/server/notification/NotificationManagerService.java;drc=86869c922207a240884697215ba0bf5b89bd0b37;l=1738
-            // there is a bug from android 10, the enqueueNotificationInternal method 3rd parameter is need a callingUid, in this method, r.sbn.getUid() actually is the targetUid
-            // when a notification post from HMSPush and snoozed, then the notification will never show again
-            // this hook temporary fix this issue
-            try {
+            // 同樣利用 runCatching 來處理預期內的 NoSuchMethodError
+            runCatching {
                 classNotificationManagerService.hookMethod("isCallerAndroid", String::class.java, Int::class.java) {
                     doBefore {
-                        val callingPkg = args[0] as String
-                        if (callingPkg == ANDROID_PACKAGE_NAME) {
+                        if (args[0] as String == ANDROID_PACKAGE_NAME) {
                             result = true
                         }
                     }
                 }
-            } catch (e: NoSuchMethodError) {
-                //Samsung One UI 7 delete this method
+            }.onFailure {
+                // Samsung One UI 7 delete this method
                 XLog.d(TAG, "hook isCallerAndroid error, NoSuchMethodError")
             }
         }
